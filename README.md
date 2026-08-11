@@ -9,7 +9,8 @@ Inspired by [git-history](https://github.com/pomber/git-history).
 - **Auto-detect from clipboard** — on launch, reads your clipboard; if it holds a valid git-tracked file path the history loads immediately.
 - **Commit tab bar** — equal-width tabs, centred on the current commit. Older commits on the left, newer on the right.
 - **Changed line highlighting** — lines added or modified in the selected commit are rendered bright; unchanged lines are dim.
-- **Jump to first change** — press `f` to scroll directly to the first modified line (with one line of context above it).
+- **Jump to first/last change** — press `f` to jump to the first modified line, `l` to jump to the last modified line (one context line above each).
+- **Navigate between change sections** — press `n` / `p` to jump to the next or previous hunk of changed lines.
 
 ## Requirements
 
@@ -41,6 +42,9 @@ Move the binary somewhere on your `$PATH`:
 | `→` | Newer commit |
 | `↑` / `↓` | Scroll file content |
 | `f` | Jump to first changed line |
+| `l` | Jump to last changed line |
+| `n` | Next changed section (hunk) |
+| `p` | Previous changed section (hunk) |
 | `b` | Back to file path input |
 | `q` / `Esc` | Quit |
 
