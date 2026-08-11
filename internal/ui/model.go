@@ -121,6 +121,7 @@ type Model struct {
 	lines      []string
 	changed    map[int]bool // 1-indexed lines that are "added" at currIdx
 	scroll     int
+	anchorLine int // 1-indexed top-visible line; preserved across commit switches
 	contentErr string // inline error shown in the file content area; does not block navigation
 }
 
@@ -227,18 +228,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "left":
 				if m.currIdx > 0 {
 					m.currIdx--
-					m.scroll = 0
 					return m, loadContent(m.repoRoot, m.commits, m.currIdx)
 				}
 			case "right":
 				if m.currIdx < len(m.commits)-1 {
 					m.currIdx++
-					m.scroll = 0
 					return m, loadContent(m.repoRoot, m.commits, m.currIdx)
 				}
 			case "up":
 				if m.scroll > 0 {
 					m.scroll--
+					m.anchorLine = m.scroll + 1
 				}
 			case "down":
 				maxScroll := len(m.lines) - m.contentHeight()
@@ -247,6 +247,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if m.scroll < maxScroll {
 					m.scroll++
+					m.anchorLine = m.scroll + 1
 				}
 			case "f":
 				// jump to first changed line, keeping one line of context above it
@@ -254,6 +255,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scroll = first - 1
 				if m.scroll < 0 {
 					m.scroll = 0
+				}
+				m.anchorLine = m.scroll + 1
+			case "l":
+				last := m.lastChangedLine()
+				m.scroll = last - 2
+				maxScroll := len(m.lines) - m.contentHeight()
+				if maxScroll < 0 {
+					maxScroll = 0
+				}
+				if m.scroll > maxScroll {
+					m.scroll = maxScroll
+				}
+				m.anchorLine = m.scroll + 1
+			case "n":
+				if pos := m.nextChangedSection(); pos >= 0 {
+					m.scroll = pos
+					m.anchorLine = m.scroll + 1
+				}
+			case "p":
+				if pos := m.prevChangedSection(); pos >= 0 {
+					m.scroll = pos
+					m.anchorLine = m.scroll + 1
 				}
 			}
 
@@ -275,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filePath = msg.filePath
 		m.currIdx = len(msg.commits) - 1 // start at latest
 		m.scroll = 0
+		m.anchorLine = 1
 		return m, loadContent(m.repoRoot, m.commits, m.currIdx)
 
 	case contentMsg:
@@ -285,6 +309,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.changed = msg.changedLines
 		m.lines = strings.Split(strings.TrimRight(m.content, "\n"), "\n")
 		m.contentErr = ""
+		// Restore scroll to the saved anchor line; clamp if the new file is shorter.
+		m.scroll = m.anchorLine - 1
+		maxScroll := len(m.lines) - m.contentHeight()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if m.scroll > maxScroll {
+			m.scroll = maxScroll
+		}
 		m.state = stateView
 
 	case contentErrMsg:
@@ -456,6 +489,64 @@ func (m Model) firstChangedLine() int {
 	return 1
 }
 
+func (m Model) lastChangedLine() int {
+	for i := len(m.lines); i >= 1; i-- {
+		if m.changed[i] {
+			return i
+		}
+	}
+	return len(m.lines)
+}
+
+// nextChangedSection returns the 0-indexed scroll position for the next hunk
+// of changed lines that starts strictly after the current top-visible line.
+// Returns -1 if there is no next hunk.
+func (m Model) nextChangedSection() int {
+	inChanged := false
+	for i := 1; i <= len(m.lines); i++ {
+		c := m.changed[i]
+		if !inChanged && c {
+			inChanged = true
+			scroll := i - 2
+			if scroll < 0 {
+				scroll = 0
+			}
+			// Only accept positions that actually advance past the current scroll.
+			if scroll > m.scroll {
+				return scroll
+			}
+		} else if inChanged && !c {
+			inChanged = false
+		}
+	}
+	return -1
+}
+
+// prevChangedSection returns the 0-indexed scroll position for the previous hunk
+// of changed lines that starts strictly before the current top-visible line.
+// Returns -1 if there is no previous hunk.
+func (m Model) prevChangedSection() int {
+	currentTop := m.scroll + 1 // 1-indexed
+	found := -1
+	inChanged := false
+	for i := 1; i <= len(m.lines); i++ {
+		c := m.changed[i]
+		if !inChanged && c {
+			inChanged = true
+			if i < currentTop {
+				scroll := i - 2
+				if scroll < 0 {
+					scroll = 0
+				}
+				found = scroll
+			}
+		} else if inChanged && !c {
+			inChanged = false
+		}
+	}
+	return found
+}
+
 func (m Model) renderContent() string {
 	if m.contentErr != "" {
 		return "  " + errorStyle.Render("⚠ "+m.contentErr) + "\n"
@@ -498,7 +589,7 @@ func (m Model) renderContent() string {
 
 func (m Model) renderStatus() string {
 	pos := fmt.Sprintf("%d/%d", m.currIdx+1, len(m.commits))
-	help := "← → navigate  •  ↑↓ scroll  •  f first change  •  b back  •  q/Esc quit"
+	help := "← → navigate  •  ↑↓ scroll  •  n/p next/prev change  •  f/l first/last  •  b back  •  q/Esc quit"
 	bar := pos + "  " + help
 	return statusStyle.Width(m.width).Render(bar)
 }
